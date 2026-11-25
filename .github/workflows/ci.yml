@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - run: ./mvnw --batch-mode --no-transfer-progress verify
+      - name: Check the packaged service
+        shell: bash
+        run: |
+          archives=(target/sotto-access-*.jar)
+          test "${#archives[@]}" -eq 1
+          test -f "${archives[0]}"
+
+          java -jar "${archives[0]}" --server.address=127.0.0.1 --server.port=18080 >target/smoke.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          if ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 \
+            --max-time 3 --retry-max-time 20 http://127.0.0.1:18080/actuator/health; then
+            cat target/smoke.log
+            exit 1
+          fi
