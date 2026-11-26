@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+sotto_revision=a373d372c6119fafe779c899af29b8a9eaed3da5
+if (( $# < 2 )); then
+    printf 'Usage: %s /path/to/pinned/sotto /path/to/caddy [Maven options]\n' "$0" >&2
+    exit 2
+fi
+
+access_checkout=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+sotto_checkout=$(cd -- "$1" && pwd -P)
+caddy=$(command -v -- "$2")
+caddy=$(cd -- "$(dirname -- "$caddy")" && pwd -P)/$(basename -- "$caddy")
+shift 2
+
+if [[ $(git -C "$sotto_checkout" rev-parse HEAD) != "$sotto_revision" ]] \
+    || ! git -C "$sotto_checkout" diff HEAD --quiet; then
+    printf 'Use a clean Sotto checkout at %s.\n' "$sotto_revision" >&2
+    exit 2
+fi
+
+target_dir=${CARGO_TARGET_DIR:-"$sotto_checkout/target"}
+mkdir -p -- "$target_dir"
+target_dir=$(cd -- "$target_dir" && pwd -P)
+(
+    cd -- "$sotto_checkout"
+    cargo build --target-dir "$target_dir" --locked -p sotto-server --features e2e-access-protocol
+)
+
+scratch_dir=$(mktemp -d)
+fixture_pid=''
+cleanup() {
+    if [[ -n "$fixture_pid" ]]; then
+        kill -TERM "$fixture_pid" 2>/dev/null || true
+        wait "$fixture_pid" 2>/dev/null || true
+    fi
+    rm -rf -- "$scratch_dir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+callback_port=$(python3 - <<'PY'
+import socket
+
+with socket.socket() as listener:
+    listener.bind(("127.0.0.1", 0))
+    print(listener.getsockname()[1])
+PY
+)
+
+"$sotto_checkout/scripts/access-protocol-fixture" \
+    --server "$target_dir/debug/sotto-server" --caddy "$caddy" \
+    --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$scratch_dir/fixture.log" 2>&1 &
+fixture_pid=$!
+connection=''
+for _attempt in {1..300}; do
+    connection=$(sed -n 's/^Fixture ready\. Connection details: //p' "$scratch_dir/fixture.log")
+    if [[ -n "$connection" ]] || ! kill -0 "$fixture_pid" 2>/dev/null; then
+        break
+    fi
+    sleep 0.2
+done
+if [[ ! -f "$connection" ]]; then
+    cat "$scratch_dir/fixture.log" >&2
+    printf 'The Sotto protocol fixture did not become ready.\n' >&2
+    exit 1
+fi
+
+ca=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["ca"])' "$connection")
+keytool -importcert -noprompt -alias sotto-fixture -file "$ca" \
+    -storetype PKCS12 -keystore "$scratch_dir/trust.p12" -storepass changeit
+
+printf 'Sotto fixture revision %s\n' "$sotto_revision"
+printf 'Access checkout revision %s\n' "$(git -C "$access_checkout" rev-parse HEAD)"
+cd -- "$access_checkout"
+./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate clean verify \
+    "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$scratch_dir/trust.p12" "$@"
