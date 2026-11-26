@@ -24,19 +24,28 @@ jobs:
       - run: ./mvnw --batch-mode --no-transfer-progress verify
       - name: Check the packaged service
         shell: bash
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:55432/sotto_access
+          SPRING_DATASOURCE_USERNAME: sotto_access
+          SPRING_DATASOURCE_PASSWORD: local-access
         run: |
+          trap 'docker compose down --volumes' EXIT
+          docker compose up --wait postgres
           archives=(target/sotto-access-*.jar)
           test "${#archives[@]}" -eq 1
           test -f "${archives[0]}"
 
           java -jar "${archives[0]}" --server.address=127.0.0.1 --server.port=18080 >target/smoke.log 2>&1 &
           server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          trap 'kill "$server_pid" 2>/dev/null || true; docker compose down --volumes' EXIT
 
           if ! curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 \
             --max-time 3 --retry-max-time 20 http://127.0.0.1:18080/actuator/health; then
             cat target/smoke.log
             exit 1
           fi
+          curl --fail --silent --show-error --max-time 3 http://127.0.0.1:18080/ >target/home.html
+          grep -F '<h1>Sotto Access</h1>' target/home.html
+          curl --fail --silent --show-error --max-time 3 http://127.0.0.1:18080/css/access.css >/dev/null
       - name: Compile the protocol gate
         run: ./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate test-compile

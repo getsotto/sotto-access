@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres@sha256:07abc3f43c9395b0bdbbab36bc25ddb0e8d83cd4fcafb5fb7d6abe14ff156dd8
+    environment:
+      POSTGRES_PASSWORD: local-admin
+      ACCESS_DB_PASSWORD: local-access
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/provision-access.sql:/docker-entrypoint-initdb.d/10-access.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "sotto_access", "-d", "sotto_access"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  postgres-data:

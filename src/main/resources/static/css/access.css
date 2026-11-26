@@ -1,0 +1,26 @@
+:root {
+    color-scheme: light dark;
+    font-family: system-ui, sans-serif;
+    line-height: 1.55;
+}
+
+body {
+    margin: 0;
+    border-block-start: 0.25rem solid #537a69;
+}
+
+main {
+    max-inline-size: 44rem;
+    margin-inline: auto;
+    padding: clamp(2rem, 8vw, 6rem) 1.5rem;
+}
+
+h1 {
+    margin-block: 0 0.5rem;
+    font-size: clamp(2rem, 6vw, 3.5rem);
+    line-height: 1.15;
+}
+
+p {
+    margin-block: 0;
+}
