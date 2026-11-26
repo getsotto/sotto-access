@@ -27,6 +27,11 @@ target_dir=$(cd -- "$target_dir" && pwd -P)
     cargo build --target-dir "$target_dir" --locked -p sotto-server --features e2e-access-protocol
 )
 
+# Pull the pinned harness's PostgreSQL image before starting the readiness clock.
+if ! docker image inspect postgres:16 >/dev/null 2>&1; then
+    docker pull postgres:16
+fi
+
 scratch_dir=$(mktemp -d)
 fixture_pid=''
 cleanup() {
@@ -56,7 +61,7 @@ fixture_log="$scratch_dir/fixture.log"
     --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$fixture_log" 2>&1 &
 fixture_pid=$!
 connection=''
-for _attempt in {1..300}; do
+for _attempt in {1..600}; do
     connection=$(sed -n 's/^Fixture ready\. Connection details: //p' "$fixture_log")
     if [[ -n "$connection" ]] || ! kill -0 "$fixture_pid" 2>/dev/null; then
         break
