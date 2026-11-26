@@ -49,20 +49,22 @@ with socket.socket() as listener:
 PY
 )
 
+fixture_log="$scratch_dir/fixture.log"
+: >"$fixture_log"
 "$sotto_checkout/scripts/access-protocol-fixture" \
     --server "$target_dir/debug/sotto-server" --caddy "$caddy" \
-    --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$scratch_dir/fixture.log" 2>&1 &
+    --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$fixture_log" 2>&1 &
 fixture_pid=$!
 connection=''
 for _attempt in {1..300}; do
-    connection=$(sed -n 's/^Fixture ready\. Connection details: //p' "$scratch_dir/fixture.log")
+    connection=$(sed -n 's/^Fixture ready\. Connection details: //p' "$fixture_log")
     if [[ -n "$connection" ]] || ! kill -0 "$fixture_pid" 2>/dev/null; then
         break
     fi
     sleep 0.2
 done
 if [[ ! -f "$connection" ]]; then
-    cat "$scratch_dir/fixture.log" >&2
+    cat "$fixture_log" >&2
     printf 'The Sotto protocol fixture did not become ready.\n' >&2
     exit 1
 fi
