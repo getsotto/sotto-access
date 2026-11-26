@@ -55,7 +55,7 @@ class SottoDeploymentIT {
             assertThat(retried.statusCode()).as("fresh proof for the same attempt").isEqualTo(200);
             assertThat(ProtocolFixture.JSON.readTree(retried.body())).isEqualTo(receipt);
 
-            URI status = fixture.endpoint("/connection-status/" + attempt);
+            URI status = fixture.endpoint("/connection-status/" + attempt + "?view=receipt");
             var wrongMethod = proof(signer, "POST", status, null, Instant.now());
             assertThat(send(http, status, "GET", null, wrongMethod).statusCode()).as("changed method").isEqualTo(401);
             var statusProof = proof(signer, "GET", status, null, Instant.now());
