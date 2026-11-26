@@ -1,0 +1,13 @@
+\set ON_ERROR_STOP on
+\getenv access_password ACCESS_DB_PASSWORD
+
+CREATE ROLE sotto_access LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    PASSWORD :'access_password';
+
+CREATE DATABASE sotto_access;
+REVOKE ALL ON DATABASE sotto_access FROM PUBLIC;
+GRANT CONNECT ON DATABASE sotto_access TO sotto_access;
+
+\connect sotto_access
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+CREATE SCHEMA access AUTHORIZATION sotto_access;
