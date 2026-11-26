@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+sotto_revision=eb9a874ed16f046f1ac31e74bd1af9e5003a3f5a
+postgres_image=postgres@sha256:07abc3f43c9395b0bdbbab36bc25ddb0e8d83cd4fcafb5fb7d6abe14ff156dd8
+if (( $# != 2 )); then
+    printf 'Usage: %s /path/to/pinned/sotto /path/to/caddy\n' "$0" >&2
+    exit 2
+fi
+
+access_checkout=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+sotto_checkout=$(cd -- "$1" && pwd -P)
+caddy=$(command -v -- "$2")
+caddy=$(cd -- "$(dirname -- "$caddy")" && pwd -P)/$(basename -- "$caddy")
+
+if [[ $(git -C "$sotto_checkout" rev-parse HEAD) != "$sotto_revision" ]] \
+    || ! git -C "$sotto_checkout" diff HEAD --quiet; then
+    printf 'Use a clean Sotto checkout at %s.\n' "$sotto_revision" >&2
+    exit 2
+fi
+
+target_dir=${CARGO_TARGET_DIR:-"$sotto_checkout/target"}
+mkdir -p -- "$target_dir"
+target_dir=$(cd -- "$target_dir" && pwd -P)
+(
+    cd -- "$sotto_checkout"
+    cargo build --target-dir "$target_dir" --locked -p sotto-server --features e2e-access-protocol
+)
+
+# Pull the pinned harness's PostgreSQL image before starting the readiness clock.
+if ! docker image inspect "$postgres_image" >/dev/null 2>&1; then
+    docker pull "$postgres_image"
+fi
+
+scratch_dir=$(mktemp -d)
+fixture_pid=''
+maven_pid=''
+stop_fixture() {
+    if [[ -n "$fixture_pid" ]]; then
+        kill -TERM "$fixture_pid" 2>/dev/null || true
+        wait "$fixture_pid" 2>/dev/null || true
+        fixture_pid=''
+    fi
+}
+
+# Invoked by the EXIT trap.
+# shellcheck disable=SC2329
+cleanup() {
+    if [[ -n "$maven_pid" ]]; then
+        kill -TERM "$maven_pid" 2>/dev/null || true
+    fi
+    stop_fixture
+    if [[ -n "$maven_pid" ]]; then
+        wait "$maven_pid" 2>/dev/null || true
+    fi
+    rm -rf -- "$scratch_dir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+printf 'Sotto fixture revision %s\n' "$sotto_revision"
+printf 'Access checkout revision %s\n' "$(git -C "$access_checkout" rev-parse HEAD)"
+cd -- "$access_checkout"
+
+for attempt in 1 2 3; do
+    callback_port=$(python3 - <<'PY'
+import socket
+
+with socket.socket() as listener:
+    listener.bind(("127.0.0.1", 0))
+    print(listener.getsockname()[1])
+PY
+)
+
+    fixture_log="$scratch_dir/fixture.log"
+    : >"$fixture_log"
+    "$sotto_checkout/scripts/access-protocol-fixture" \
+        --server "$target_dir/debug/sotto-server" --caddy "$caddy" --postgres-image "$postgres_image" \
+        --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$fixture_log" 2>&1 &
+    fixture_pid=$!
+    connection=''
+    for _attempt in {1..600}; do
+        connection=$(sed -n 's/^Fixture ready\. Connection details: //p' "$fixture_log")
+        if [[ -n "$connection" ]] || ! kill -0 "$fixture_pid" 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    if [[ ! -f "$connection" ]]; then
+        cat "$fixture_log" >&2
+        printf 'The Sotto protocol fixture did not become ready.\n' >&2
+        exit 1
+    fi
+
+    ca=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["ca"])' "$connection")
+    trust_store="$scratch_dir/trust-$attempt.p12"
+    keytool -importcert -noprompt -alias sotto-fixture -file "$ca" \
+        -storetype PKCS12 -keystore "$trust_store" -storepass changeit
+
+    report=target/failsafe-reports/TEST-uk.co.getsotto.protocolgate.SottoSignInIT.xml
+    rm -f -- "$report"
+    ./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate clean verify \
+        "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$trust_store" &
+    maven_pid=$!
+    # Bash can handle a cancellation trap while waiting on the Maven child.
+    maven_result=0
+    wait "$maven_pid" || maven_result=$?
+    maven_pid=''
+    if (( maven_result == 0 )); then
+        exit 0
+    fi
+
+    # Only retry a reported Spring bind failure for the exact callback port.
+    if (( attempt == 3 )) || ! grep -Fq "PortInUseException: Port $callback_port is already in use" "$report" 2>/dev/null; then
+        exit "$maven_result"
+    fi
+    printf 'Callback port %s was claimed before Spring could bind it. Retrying the gate.\n' "$callback_port" >&2
+    stop_fixture
+done

@@ -38,3 +38,5 @@ jobs:
             cat target/smoke.log
             exit 1
           fi
+      - name: Compile the protocol gate
+        run: ./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate test-compile

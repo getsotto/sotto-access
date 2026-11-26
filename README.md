@@ -21,6 +21,10 @@ curl --fail http://localhost:8080/actuator/health
 
 See [the contribution guide](CONTRIBUTING.md) for build and test conventions.
 
+## Sotto protocol gate
+
+The opt-in protocol gate runs Spring Security and two Java signing implementations through the pinned Sotto server and Caddy. It uses disposable PostgreSQL, mock sign-in and temporary keys. [Run the protocol gate](docs/protocol-gate.md)
+
 ## Licence
 
 Sotto Access is licensed under the [Apache License 2.0](LICENSE).
