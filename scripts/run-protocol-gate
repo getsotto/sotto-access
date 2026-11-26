@@ -2,8 +2,8 @@
 set -euo pipefail
 
 sotto_revision=a373d372c6119fafe779c899af29b8a9eaed3da5
-if (( $# < 2 )); then
-    printf 'Usage: %s /path/to/pinned/sotto /path/to/caddy [Maven options]\n' "$0" >&2
+if (( $# != 2 )); then
+    printf 'Usage: %s /path/to/pinned/sotto /path/to/caddy\n' "$0" >&2
     exit 2
 fi
 
@@ -11,7 +11,6 @@ access_checkout=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 sotto_checkout=$(cd -- "$1" && pwd -P)
 caddy=$(command -v -- "$2")
 caddy=$(cd -- "$(dirname -- "$caddy")" && pwd -P)/$(basename -- "$caddy")
-shift 2
 
 if [[ $(git -C "$sotto_checkout" rev-parse HEAD) != "$sotto_revision" ]] \
     || ! git -C "$sotto_checkout" diff HEAD --quiet; then
@@ -82,4 +81,4 @@ printf 'Sotto fixture revision %s\n' "$sotto_revision"
 printf 'Access checkout revision %s\n' "$(git -C "$access_checkout" rev-parse HEAD)"
 cd -- "$access_checkout"
 ./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate clean verify \
-    "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$scratch_dir/trust.p12" "$@"
+    "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$scratch_dir/trust.p12"
