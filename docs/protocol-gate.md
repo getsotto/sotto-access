@@ -15,11 +15,11 @@ Check out the pinned Rust revision, then run the gate from the Access checkout.
 
 ```sh
 git clone https://github.com/getsotto/sotto.git /tmp/sotto-protocol-gate
-git -C /tmp/sotto-protocol-gate checkout --detach a373d372c6119fafe779c899af29b8a9eaed3da5
+git -C /tmp/sotto-protocol-gate checkout --detach eb9a874ed16f046f1ac31e74bd1af9e5003a3f5a
 scripts/run-protocol-gate /tmp/sotto-protocol-gate /tmp/sotto-fixture-caddy
 ```
 
-The runner builds the fixture with the checked-in Cargo lockfile, fetches the PostgreSQL image if needed, registers a temporary loopback callback and creates a JVM trust store from Caddy's fixture certificate. The Rust runner creates the database, mock identity and signing keys. The two runners remove the fixture processes, database container and temporary files when the run finishes or is cancelled.
+The runner builds the fixture with the checked-in Cargo lockfile and fetches PostgreSQL 16.16 by its multi-platform digest `sha256:07abc3f43c9395b0bdbbab36bc25ddb0e8d83cd4fcafb5fb7d6abe14ff156dd8`. It registers a temporary loopback callback and creates a JVM trust store from Caddy's fixture certificate. The Rust runner creates the database, mock identity and signing keys. The two runners remove the fixture processes, database container and temporary files when the run finishes or is cancelled. [Sotto fixture image option](https://github.com/getsotto/sotto/pull/916)
 
 ## Observed protocol
 
@@ -37,11 +37,12 @@ The test transport explicitly sends `localhost` as its TLS server name because t
 
 ## Verification
 
-The Java gate at `44bbefe8e8298779b8ee7dffbeabe48003d047a4` ran from a fresh Access checkout with OpenJDK 25.0.3, disposable PostgreSQL 16.16 and Caddy 2.11.9 at the pinned Sotto revision. Spring sign-in and both signing implementations passed. The standalone Rust and Caddy `--check` also passed against the same fixture revision. Removing the audience override or excluding the digest from a POST signature individually failed the corresponding Java test. The restored gate passed again.
+The original Java gate at `44bbefe8e8298779b8ee7dffbeabe48003d047a4` ran from a fresh Access checkout with OpenJDK 25.0.3, disposable PostgreSQL 16.16 and Caddy 2.11.9 against Sotto `a373d372c6119fafe779c899af29b8a9eaed3da5`. Spring sign-in and both signing implementations passed. Removing the audience override or excluding the digest from a POST signature individually failed the corresponding Java test. The restored gate passed again.
 
 Run the Rust check on its own from the pinned Sotto checkout after the Java gate builds the fixture.
 
 ```sh
 scripts/access-protocol-fixture --server target/debug/sotto-server \
-  --caddy /tmp/sotto-fixture-caddy --check
+  --caddy /tmp/sotto-fixture-caddy \
+  --postgres-image postgres@sha256:07abc3f43c9395b0bdbbab36bc25ddb0e8d83cd4fcafb5fb7d6abe14ff156dd8 --check
 ```

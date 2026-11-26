@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sotto_revision=a373d372c6119fafe779c899af29b8a9eaed3da5
+sotto_revision=eb9a874ed16f046f1ac31e74bd1af9e5003a3f5a
+postgres_image=postgres@sha256:07abc3f43c9395b0bdbbab36bc25ddb0e8d83cd4fcafb5fb7d6abe14ff156dd8
 if (( $# != 2 )); then
     printf 'Usage: %s /path/to/pinned/sotto /path/to/caddy\n' "$0" >&2
     exit 2
@@ -27,8 +28,8 @@ target_dir=$(cd -- "$target_dir" && pwd -P)
 )
 
 # Pull the pinned harness's PostgreSQL image before starting the readiness clock.
-if ! docker image inspect postgres:16 >/dev/null 2>&1; then
-    docker pull postgres:16
+if ! docker image inspect "$postgres_image" >/dev/null 2>&1; then
+    docker pull "$postgres_image"
 fi
 
 scratch_dir=$(mktemp -d)
@@ -65,7 +66,7 @@ PY
 fixture_log="$scratch_dir/fixture.log"
 : >"$fixture_log"
 "$sotto_checkout/scripts/access-protocol-fixture" \
-    --server "$target_dir/debug/sotto-server" --caddy "$caddy" \
+    --server "$target_dir/debug/sotto-server" --caddy "$caddy" --postgres-image "$postgres_image" \
     --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$fixture_log" 2>&1 &
 fixture_pid=$!
 connection=''
