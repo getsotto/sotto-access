@@ -35,16 +35,21 @@ fi
 scratch_dir=$(mktemp -d)
 fixture_pid=''
 maven_pid=''
-# The EXIT trap calls this after normal completion and signal handling.
+stop_fixture() {
+    if [[ -n "$fixture_pid" ]]; then
+        kill -TERM "$fixture_pid" 2>/dev/null || true
+        wait "$fixture_pid" 2>/dev/null || true
+        fixture_pid=''
+    fi
+}
+
+# Invoked by the EXIT trap.
 # shellcheck disable=SC2329
 cleanup() {
     if [[ -n "$maven_pid" ]]; then
         kill -TERM "$maven_pid" 2>/dev/null || true
     fi
-    if [[ -n "$fixture_pid" ]]; then
-        kill -TERM "$fixture_pid" 2>/dev/null || true
-        wait "$fixture_pid" 2>/dev/null || true
-    fi
+    stop_fixture
     if [[ -n "$maven_pid" ]]; then
         wait "$maven_pid" 2>/dev/null || true
     fi
@@ -54,7 +59,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-callback_port=$(python3 - <<'PY'
+printf 'Sotto fixture revision %s\n' "$sotto_revision"
+printf 'Access checkout revision %s\n' "$(git -C "$access_checkout" rev-parse HEAD)"
+cd -- "$access_checkout"
+
+for attempt in 1 2 3; do
+    callback_port=$(python3 - <<'PY'
 import socket
 
 with socket.socket() as listener:
@@ -63,38 +73,48 @@ with socket.socket() as listener:
 PY
 )
 
-fixture_log="$scratch_dir/fixture.log"
-: >"$fixture_log"
-"$sotto_checkout/scripts/access-protocol-fixture" \
-    --server "$target_dir/debug/sotto-server" --caddy "$caddy" --postgres-image "$postgres_image" \
-    --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$fixture_log" 2>&1 &
-fixture_pid=$!
-connection=''
-for _attempt in {1..600}; do
-    connection=$(sed -n 's/^Fixture ready\. Connection details: //p' "$fixture_log")
-    if [[ -n "$connection" ]] || ! kill -0 "$fixture_pid" 2>/dev/null; then
-        break
+    fixture_log="$scratch_dir/fixture.log"
+    : >"$fixture_log"
+    "$sotto_checkout/scripts/access-protocol-fixture" \
+        --server "$target_dir/debug/sotto-server" --caddy "$caddy" --postgres-image "$postgres_image" \
+        --callback "http://127.0.0.1:$callback_port/login/oauth2/code/sotto" >"$fixture_log" 2>&1 &
+    fixture_pid=$!
+    connection=''
+    for _attempt in {1..600}; do
+        connection=$(sed -n 's/^Fixture ready\. Connection details: //p' "$fixture_log")
+        if [[ -n "$connection" ]] || ! kill -0 "$fixture_pid" 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    if [[ ! -f "$connection" ]]; then
+        cat "$fixture_log" >&2
+        printf 'The Sotto protocol fixture did not become ready.\n' >&2
+        exit 1
     fi
-    sleep 0.2
+
+    ca=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["ca"])' "$connection")
+    trust_store="$scratch_dir/trust-$attempt.p12"
+    keytool -importcert -noprompt -alias sotto-fixture -file "$ca" \
+        -storetype PKCS12 -keystore "$trust_store" -storepass changeit
+
+    report=target/failsafe-reports/TEST-uk.co.getsotto.protocolgate.SottoSignInIT.xml
+    rm -f -- "$report"
+    ./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate clean verify \
+        "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$trust_store" &
+    maven_pid=$!
+    # Bash can handle a cancellation trap while waiting on the Maven child.
+    maven_result=0
+    wait "$maven_pid" || maven_result=$?
+    maven_pid=''
+    if (( maven_result == 0 )); then
+        exit 0
+    fi
+
+    # Only retry a reported Spring bind failure for the exact callback port.
+    if (( attempt == 3 )) || ! grep -Fq "PortInUseException: Port $callback_port is already in use" "$report" 2>/dev/null; then
+        exit "$maven_result"
+    fi
+    printf 'Callback port %s was claimed before Spring could bind it. Retrying the gate.\n' "$callback_port" >&2
+    stop_fixture
 done
-if [[ ! -f "$connection" ]]; then
-    cat "$fixture_log" >&2
-    printf 'The Sotto protocol fixture did not become ready.\n' >&2
-    exit 1
-fi
-
-ca=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["ca"])' "$connection")
-keytool -importcert -noprompt -alias sotto-fixture -file "$ca" \
-    -storetype PKCS12 -keystore "$scratch_dir/trust.p12" -storepass changeit
-
-printf 'Sotto fixture revision %s\n' "$sotto_revision"
-printf 'Access checkout revision %s\n' "$(git -C "$access_checkout" rev-parse HEAD)"
-cd -- "$access_checkout"
-./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate clean verify \
-    "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$scratch_dir/trust.p12" &
-maven_pid=$!
-# Bash can handle a cancellation trap while waiting on the Maven child.
-maven_result=0
-wait "$maven_pid" || maven_result=$?
-maven_pid=''
-exit "$maven_result"

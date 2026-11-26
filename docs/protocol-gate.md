@@ -39,6 +39,8 @@ The test transport explicitly sends `localhost` as its TLS server name because t
 
 The original Java gate at `44bbefe8e8298779b8ee7dffbeabe48003d047a4` ran from a fresh Access checkout with OpenJDK 25.0.3, disposable PostgreSQL 16.16 and Caddy 2.11.9 against Sotto `a373d372c6119fafe779c899af29b8a9eaed3da5`. Spring sign-in and both signing implementations passed. Removing the audience override or excluding the digest from a POST signature individually failed the corresponding Java test. The restored gate passed again.
 
+With the pinned image, the standalone Rust and Caddy check passed. A forced Spring callback port collision triggered a retry and all three Java tests passed on the second attempt. The runner retries up to twice when Spring reports that the registered callback port is already in use.
+
 Run the Rust check on its own from the pinned Sotto checkout after the Java gate builds the fixture.
 
 ```sh
