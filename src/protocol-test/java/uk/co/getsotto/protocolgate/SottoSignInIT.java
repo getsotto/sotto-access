@@ -59,7 +59,12 @@ import org.springframework.web.client.RestTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(classes = SottoSignInIT.TestAccess.class, webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
+@SpringBootTest(classes = SottoSignInIT.TestAccess.class, webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
+        properties = {
+                // RestClient's debug logging includes the token request form.
+                "logging.level.org.springframework.web.client=OFF",
+                "logging.level.org.springframework.security=INFO"
+        })
 class SottoSignInIT {
 
     private static final ProtocolFixture FIXTURE = ProtocolFixture.load();
