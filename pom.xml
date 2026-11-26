@@ -62,6 +62,12 @@
                     <version>10.9.1</version>
                     <scope>test</scope>
                 </dependency>
+                <dependency>
+                    <groupId>com.authlete</groupId>
+                    <artifactId>http-message-signatures</artifactId>
+                    <version>1.8</version>
+                    <scope>test</scope>
+                </dependency>
             </dependencies>
             <build>
                 <plugins>
