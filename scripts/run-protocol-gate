@@ -33,10 +33,19 @@ fi
 
 scratch_dir=$(mktemp -d)
 fixture_pid=''
+maven_pid=''
+# The EXIT trap calls this after normal completion and signal handling.
+# shellcheck disable=SC2329
 cleanup() {
+    if [[ -n "$maven_pid" ]]; then
+        kill -TERM "$maven_pid" 2>/dev/null || true
+    fi
     if [[ -n "$fixture_pid" ]]; then
         kill -TERM "$fixture_pid" 2>/dev/null || true
         wait "$fixture_pid" 2>/dev/null || true
+    fi
+    if [[ -n "$maven_pid" ]]; then
+        wait "$maven_pid" 2>/dev/null || true
     fi
     rm -rf -- "$scratch_dir"
 }
@@ -81,4 +90,10 @@ printf 'Sotto fixture revision %s\n' "$sotto_revision"
 printf 'Access checkout revision %s\n' "$(git -C "$access_checkout" rev-parse HEAD)"
 cd -- "$access_checkout"
 ./mvnw --batch-mode --no-transfer-progress -Pprotocol-gate clean verify \
-    "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$scratch_dir/trust.p12"
+    "-Dsotto.protocol.connection=$connection" "-Dsotto.protocol.trust-store=$scratch_dir/trust.p12" &
+maven_pid=$!
+# Bash can handle a cancellation trap while waiting on the Maven child.
+maven_result=0
+wait "$maven_pid" || maven_result=$?
+maven_pid=''
+exit "$maven_result"
